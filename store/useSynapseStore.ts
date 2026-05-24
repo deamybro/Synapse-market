@@ -42,7 +42,7 @@ export const useSynapseStore = create<SynapseStore>((set) => ({
       agents: state.agents.map((agent) => (agent.id === agentId ? { ...agent, ...updates } : agent)),
     })),
   initSocket: () => {
-    const socket = new WebSocket('ws://localhost:3001');
+    const socket = new WebSocket('wss://synapse-market-production.up.railway.app');
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'NEW_MESSAGE') {
