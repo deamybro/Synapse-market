@@ -8,7 +8,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 dotenv.config();
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // Circle API Client (Free on Testnet)
 const circleClient = initiateDeveloperControlledWalletsClient({
@@ -23,7 +23,7 @@ const provider = new ethers.JsonRpcProvider(process.env.ARC_RPC_URL);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-const server = app.listen(PORT, () => console.log(`Agent Engine running on port ${PORT}`));
+const server = app.listen(PORT, '0.0.0.0', () => console.log(`Agent Engine running on port ${PORT}`));
 const wss = new WebSocketServer({ server });
 
 async function getLLMReasoning(role: string) {
