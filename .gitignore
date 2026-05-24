@@ -1,0 +1,8 @@
+.env
+node_modules
+.next
+recovery
+dist
+build
+.DS_Store
+*.log
