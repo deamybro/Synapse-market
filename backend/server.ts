@@ -4,7 +4,6 @@ import dotenv from 'dotenv';
 import { randomUUID } from 'crypto';
 import {
   Blockchain,
-  FeeLevel,
   initiateDeveloperControlledWalletsClient,
   type CircleDeveloperControlledWalletsClient,
   type Wallet,
@@ -445,9 +444,20 @@ async function refreshAgentBalances(client: CircleDeveloperControlledWalletsClie
 }
 
 async function createPayment(fromAgentId: string, toAgentId: string, amount: number, reason: string) {
-  if (circleClient && circleStatus.ready) {
-    const result = await createCirclePayment(circleClient, fromAgentId, toAgentId, amount, reason);
-    if (result) return;
+  if (circleStatus.enabled) {
+    if (!circleClient || !circleStatus.ready) {
+      broadcast('NEW_MESSAGE', {
+        id: id(),
+        agentId: toAgentId,
+        text: 'Circle transfer paused: Agent Wallets are still initializing on Arc testnet.',
+        timestamp: Date.now(),
+        kind: 'system',
+      });
+      return;
+    }
+
+    await createCirclePayment(circleClient, fromAgentId, toAgentId, amount, reason);
+    return;
   }
 
   createMockPayment(fromAgentId, toAgentId, amount, reason);
@@ -484,7 +494,7 @@ async function createCirclePayment(
       fee: {
         type: 'level',
         config: {
-          feeLevel: FeeLevel.Medium,
+          feeLevel: 'MEDIUM',
         },
       },
       refId: `synapse:${reason}:${Date.now()}`,
