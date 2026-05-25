@@ -13,9 +13,9 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-black text-white">
+    <div className="flex min-h-screen flex-col bg-black text-white">
       <Header />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[320px_minmax(0,1fr)_300px]">
         <AgentSidebar />
         <DebateFeed />
         <Leaderboard />

@@ -6,6 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "backend:build": "tsc -p tsconfig.backend.json",
+    "backend:start": "node dist/backend/server.js",
+    "backend:dev": "npm run backend:build && npm run backend:start",
     "lint": "eslint"
   },
   "dependencies": {
