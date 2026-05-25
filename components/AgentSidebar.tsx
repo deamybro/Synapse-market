@@ -62,11 +62,14 @@ const AgentSidebar = () => {
                 <Wallet size={12} />
                 {agent.balance.toFixed(3)} USDC
               </span>
-              <span className="inline-flex items-center gap-1 text-cyan-200">
+              <span className={`inline-flex items-center gap-1 ${agent.walletStatus === 'live' ? 'text-[#00ff9d]' : 'text-cyan-200'}`}>
                 <LockKeyhole size={12} />
-                premium
+                {agent.walletStatus === 'live' ? 'Circle' : 'premium'}
               </span>
             </div>
+            {agent.walletAddress && (
+              <p className="data-font mt-2 truncate text-[10px] text-gray-500">{agent.walletAddress}</p>
+            )}
           </motion.button>
         ))}
       </div>

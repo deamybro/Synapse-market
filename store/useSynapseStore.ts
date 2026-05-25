@@ -14,6 +14,10 @@ export interface Agent {
   pnl: number;
   reputation: number;
   revenue: number;
+  walletId?: string;
+  walletAddress?: string;
+  walletStatus?: 'mock' | 'live' | 'pending' | 'error';
+  usdcTokenId?: string;
 }
 
 export interface DebateMessage {
@@ -31,6 +35,11 @@ export interface PaymentEvent {
   amount: number;
   reason: string;
   timestamp: number;
+  mode?: 'mock' | 'circle';
+  transactionId?: string;
+  txHash?: string;
+  status?: string;
+  error?: string;
 }
 
 export interface ExecutionEvent {
@@ -47,6 +56,12 @@ interface SynapseStore {
   debateFeed: DebateMessage[];
   payments: PaymentEvent[];
   execution: ExecutionEvent;
+  circleStatus: {
+    enabled: boolean;
+    ready: boolean;
+    message: string;
+    walletSetId?: string;
+  };
   selectedAgentId: string;
   unlockedPremium: Record<string, boolean>;
   connectionStatus: 'connecting' | 'live' | 'simulated' | 'offline';
@@ -206,6 +221,11 @@ export const useSynapseStore = create<SynapseStore>((set) => ({
     amount: 25000,
     participants: ['1', '3', '4', '5'],
     timestamp: Date.now(),
+  },
+  circleStatus: {
+    enabled: false,
+    ready: false,
+    message: 'Circle Agent Wallets are not connected yet.',
   },
   selectedAgentId: '1',
   unlockedPremium: {},
@@ -371,8 +391,10 @@ export const useSynapseStore = create<SynapseStore>((set) => ({
         set({
           agents: data.payload.agents || useSynapseStore.getState().agents,
           execution: data.payload.execution || useSynapseStore.getState().execution,
+          circleStatus: data.payload.circle || useSynapseStore.getState().circleStatus,
         });
       }
+      if (data.type === 'CIRCLE_STATUS') set({ circleStatus: data.payload });
       if (data.type === 'NEW_MESSAGE') useSynapseStore.getState().addMessage(data.payload);
       if (data.type === 'AGENT_UPDATE') useSynapseStore.getState().updateAgent(data.payload.agentId, data.payload.updates);
       if (data.type === 'PAYMENT') {

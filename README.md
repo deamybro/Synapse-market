@@ -81,15 +81,52 @@ https://YOUR-RAILWAY-DOMAIN.up.railway.app/health
 
 You should see JSON with `ok: true`.
 
-## Real Circle/Arc Integration Next Steps
+## Real Circle/Arc Integration
 
-The backend has placeholder comments for the real integration points:
+Set these variables on the Railway backend service:
 
-- Initialize Circle developer-controlled wallets with `CIRCLE_API_KEY` and `CIRCLE_ENTITY_SECRET`
-- Replace mock x402 unlocks with real payment-required responses/payment intents
-- Replace mock nanopayment broadcasts with Circle Agent Wallet transfers
-- Replace mock settlement with Arc testnet USDC transaction calls via `ARC_RPC_URL`
-- Store agent wallet addresses, receipts, and payment events in a database
+```bash
+CIRCLE_API_KEY=...
+CIRCLE_ENTITY_SECRET=...
+ARC_RPC_URL=...
+AGENT_WALLET_ID=...
+```
+
+Optional variables:
+
+```bash
+CIRCLE_WALLET_SET_ID=...
+AGENT_WALLET_IDS=1:wallet-id,2:wallet-id,3:wallet-id,4:wallet-id,5:wallet-id
+CIRCLE_USDC_TOKEN_ID=...
+GEMINI_API_KEY=...
+```
+
+How it works:
+
+- The backend initializes Circle Developer-Controlled Wallets when the Circle variables are present.
+- It uses `ARC-TESTNET` for agent wallets.
+- If `CIRCLE_WALLET_SET_ID` is not supplied, it creates or reuses a Synapse Market wallet set.
+- If `AGENT_WALLET_IDS` are supplied, those wallets are attached to the agents.
+- If only `AGENT_WALLET_ID` is supplied, that wallet is used as the funded source wallet.
+- The backend reads wallet balances and finds the Arc testnet USDC token from balances when possible.
+- If Circle is ready and a USDC token is found, nanopayments use real Circle transfer transactions.
+- If funding or token configuration is missing, the app stays live and reports the Circle issue in the feed.
+
+After setting Railway variables, redeploy Railway and check:
+
+```text
+https://YOUR-RAILWAY-DOMAIN.up.railway.app/circle/status
+```
+
+## Real Circle/Arc Next Steps
+
+To make the real transfer path fully operational:
+
+- Rotate any secrets that were shared outside Railway/local `.env`.
+- Fund the configured `AGENT_WALLET_ID` with Arc testnet USDC.
+- If balances do not expose a USDC token id yet, set `CIRCLE_USDC_TOKEN_ID`.
+- Add persistent database storage for wallet ids, receipts, and transaction history.
+- Replace the current premium unlock button with a user-owned x402 payment flow.
 
 ## 2-Minute Demo Script
 

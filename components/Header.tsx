@@ -5,6 +5,7 @@ import { useSynapseStore } from '@/store/useSynapseStore';
 
 const Header = () => {
   const connectionStatus = useSynapseStore((state) => state.connectionStatus);
+  const circleStatus = useSynapseStore((state) => state.circleStatus);
   const triggerMarketEvent = useSynapseStore((state) => state.triggerMarketEvent);
 
   return (
@@ -29,7 +30,7 @@ const Header = () => {
         </span>
         <span className="inline-flex items-center gap-2 rounded border border-[#1f4038] bg-[#04110e] px-3 py-2 text-xs text-[#00ff9d]">
           <Activity size={14} />
-          x402 mock flow ready
+          {circleStatus.ready ? 'Circle Arc wallets live' : circleStatus.enabled ? 'Circle connecting' : 'x402 mock flow ready'}
         </span>
         <button
           onClick={triggerMarketEvent}

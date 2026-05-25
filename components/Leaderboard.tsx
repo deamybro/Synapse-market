@@ -40,8 +40,16 @@ const Leaderboard = () => {
             const to = agents.find((agent) => agent.id === payment.toAgentId)?.name || 'Agent';
             return (
               <div key={payment.id} className="rounded border border-cyan-950 bg-[#031012] p-3 text-xs">
-                <p className="data-font text-cyan-200">{payment.amount.toFixed(3)} USDC</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="data-font text-cyan-200">{payment.amount.toFixed(3)} USDC</p>
+                  <span className={payment.mode === 'circle' ? 'text-[#00ff9d]' : 'text-gray-500'}>
+                    {payment.mode === 'circle' ? 'Circle' : 'Mock'}
+                  </span>
+                </div>
                 <p className="mt-1 text-gray-400">{from} to {to}</p>
+                {payment.status && <p className="mt-1 text-gray-500">{payment.status}</p>}
+                {payment.transactionId && <p className="data-font mt-1 truncate text-gray-500">{payment.transactionId}</p>}
+                {payment.error && <p className="mt-1 max-h-10 overflow-hidden text-red-300">{payment.error}</p>}
               </div>
             );
           })

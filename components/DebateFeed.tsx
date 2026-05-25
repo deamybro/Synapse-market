@@ -72,6 +72,12 @@ const DebateFeed = () => {
               <Metric label="Revenue" value={`$${selectedAgent.revenue.toFixed(2)}`} />
               <Metric label="Wallet" value={`${selectedAgent.balance.toFixed(1)}`} />
             </div>
+            {selectedAgent.walletAddress && (
+              <div className="rounded border border-[#12352b] bg-black p-2">
+                <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-gray-500">Arc Address</p>
+                <p className="data-font truncate text-xs text-cyan-200">{selectedAgent.walletAddress}</p>
+              </div>
+            )}
             <div className="rounded border border-[#12352b] bg-black p-3">
               <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-cyan-200">
                 <Sparkles size={14} />

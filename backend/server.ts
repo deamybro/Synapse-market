@@ -1,6 +1,14 @@
 import express from 'express';
 import { WebSocket, WebSocketServer } from 'ws';
 import dotenv from 'dotenv';
+import { randomUUID } from 'crypto';
+import {
+  Blockchain,
+  FeeLevel,
+  initiateDeveloperControlledWalletsClient,
+  type CircleDeveloperControlledWalletsClient,
+  type Wallet,
+} from '@circle-fin/developer-controlled-wallets';
 
 dotenv.config();
 
@@ -18,6 +26,10 @@ type Agent = {
   pnl: number;
   reputation: number;
   revenue: number;
+  walletId?: string;
+  walletAddress?: string;
+  walletStatus?: 'mock' | 'live' | 'pending' | 'error';
+  usdcTokenId?: string;
 };
 
 type PaymentEvent = {
@@ -27,6 +39,11 @@ type PaymentEvent = {
   amount: number;
   reason: string;
   timestamp: number;
+  mode?: 'mock' | 'circle';
+  transactionId?: string;
+  txHash?: string;
+  status?: string;
+  error?: string;
 };
 
 type ExecutionEvent = {
@@ -40,6 +57,9 @@ type ExecutionEvent = {
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
+const ARC_BLOCKCHAIN = 'ARC-TESTNET' as Blockchain;
+const WALLET_SET_NAME = 'Synapse Market Agent Wallets';
+const AGENT_REF_PREFIX = 'synapse-market-agent';
 
 app.use(express.json());
 app.use((_, res, next) => {
@@ -155,6 +175,14 @@ const debateTemplates: Record<string, string[]> = {
 };
 
 let round = 0;
+let circleStatus = {
+  enabled: false,
+  ready: false,
+  message: 'Circle credentials are not configured.',
+  walletSetId: process.env.CIRCLE_WALLET_SET_ID || '',
+};
+let circleClient: CircleDeveloperControlledWalletsClient | null = null;
+
 let execution: ExecutionEvent = {
   id: id(),
   status: 'watching',
@@ -164,16 +192,22 @@ let execution: ExecutionEvent = {
   timestamp: Date.now(),
 };
 
-// Circle/Arc integration placeholders:
-// - Initialize Circle developer-controlled wallets with CIRCLE_API_KEY and CIRCLE_ENTITY_SECRET.
-// - Replace mock nanopayment broadcasts with real x402/Circle Agent Wallet payment intents.
-// - Replace the simulated settlement step with an Arc testnet USDC transaction using ARC_RPC_URL.
+configureCircle().catch((error) => {
+  circleStatus = {
+    ...circleStatus,
+    enabled: hasCircleCredentials(),
+    ready: false,
+    message: `Circle initialization failed: ${safeError(error)}`,
+  };
+  console.warn(circleStatus.message);
+});
 
 app.get('/', (_, res) => {
   res.json({
     name: 'Synapse Market Agent Engine',
     status: 'online',
     websocket: 'connect to this same Railway URL with wss://',
+    circle: circleStatus,
   });
 });
 
@@ -183,7 +217,12 @@ app.get('/health', (_, res) => {
     agents: agents.length,
     round,
     uptime: process.uptime(),
+    circle: circleStatus,
   });
+});
+
+app.get('/circle/status', (_, res) => {
+  res.json({ circle: circleStatus, agents: agents.map(agentPublicWallet) });
 });
 
 const server = app.listen(PORT, '0.0.0.0', () => {
@@ -193,7 +232,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (client) => {
-  send(client, 'SNAPSHOT', { agents, execution });
+  send(client, 'SNAPSHOT', { agents, execution, circle: circleStatus });
   send(client, 'NEW_MESSAGE', {
     id: id(),
     agentId: '4',
@@ -267,7 +306,7 @@ function triggerMarketEvent() {
 function unlockPremium(agentId: string) {
   const agent = agents.find((item) => item.id === agentId);
   if (!agent) return;
-  createPayment('demo-user', agentId, 0.021, 'x402 premium thesis unlock');
+  createPayment(process.env.AGENT_WALLET_ID ? 'treasury' : 'demo-user', agentId, 0.021, 'x402 premium thesis unlock');
   broadcast('NEW_MESSAGE', {
     id: id(),
     agentId,
@@ -277,7 +316,239 @@ function unlockPremium(agentId: string) {
   });
 }
 
-function createPayment(fromAgentId: string, toAgentId: string, amount: number, reason: string) {
+async function configureCircle() {
+  if (!hasCircleCredentials()) {
+    broadcast('CIRCLE_STATUS', circleStatus);
+    return;
+  }
+
+  circleStatus = {
+    enabled: true,
+    ready: false,
+    message: 'Connecting to Circle developer-controlled wallets.',
+    walletSetId: process.env.CIRCLE_WALLET_SET_ID || '',
+  };
+
+  circleClient = initiateDeveloperControlledWalletsClient({
+    apiKey: process.env.CIRCLE_API_KEY || '',
+    entitySecret: process.env.CIRCLE_ENTITY_SECRET || '',
+  });
+
+  const walletSetId = await resolveWalletSetId(circleClient);
+  circleStatus.walletSetId = walletSetId;
+
+  await hydrateAgentWallets(circleClient, walletSetId);
+  await refreshAgentBalances(circleClient);
+
+  circleStatus = {
+    ...circleStatus,
+    ready: true,
+    message: 'Circle Agent Wallets are live on Arc testnet.',
+  };
+
+  broadcast('SNAPSHOT', { agents, execution, circle: circleStatus });
+}
+
+async function resolveWalletSetId(client: CircleDeveloperControlledWalletsClient) {
+  if (process.env.CIRCLE_WALLET_SET_ID) return process.env.CIRCLE_WALLET_SET_ID;
+
+  const walletSets = await client.listWalletSets();
+  const existing = walletSets.data?.walletSets?.find((walletSet) => 'name' in walletSet && walletSet.name === WALLET_SET_NAME);
+  if (existing?.id) return existing.id;
+
+  const created = await client.createWalletSet({
+    name: WALLET_SET_NAME,
+    idempotencyKey: randomUUID(),
+  });
+  const id = created.data?.walletSet?.id;
+  if (!id) throw new Error('Circle did not return a wallet set id.');
+  return id;
+}
+
+async function hydrateAgentWallets(client: CircleDeveloperControlledWalletsClient, walletSetId: string) {
+  const configuredWalletIds = parseAgentWalletIds();
+
+  for (const agent of agents) {
+    const configuredId = configuredWalletIds[agent.id] || (agent.id === '1' ? process.env.AGENT_WALLET_ID : undefined);
+    if (configuredId) {
+      await attachWalletById(client, agent, configuredId);
+      continue;
+    }
+
+    const refId = `${AGENT_REF_PREFIX}-${agent.id}`;
+    const listed = await client.listWallets({ blockchain: ARC_BLOCKCHAIN, walletSetId, refId });
+    const existing = listed.data?.wallets?.[0];
+    if (existing) {
+      attachWallet(agent, existing);
+      continue;
+    }
+
+    agent.walletStatus = 'pending';
+    const created = await client.createWallets({
+      blockchains: [ARC_BLOCKCHAIN],
+      count: 1,
+      walletSetId,
+      metadata: [{ name: agent.name, refId }],
+      accountType: 'EOA',
+      idempotencyKey: randomUUID(),
+    });
+    const wallet = created.data?.wallets?.[0];
+    if (!wallet) throw new Error(`Circle did not return a wallet for ${agent.name}.`);
+    attachWallet(agent, wallet);
+  }
+}
+
+async function attachWalletById(client: CircleDeveloperControlledWalletsClient, agent: Agent, walletId: string) {
+  const response = await client.getWallet({ id: walletId });
+  const wallet = response.data?.wallet;
+  if (!wallet) throw new Error(`Circle wallet ${walletId} was not found for ${agent.name}.`);
+  attachWallet(agent, wallet);
+}
+
+function attachWallet(agent: Agent, wallet: Wallet) {
+  agent.walletId = wallet.id;
+  agent.walletAddress = wallet.address;
+  agent.walletStatus = 'live';
+  broadcast('AGENT_UPDATE', {
+    agentId: agent.id,
+    updates: {
+      walletId: agent.walletId,
+      walletAddress: agent.walletAddress,
+      walletStatus: agent.walletStatus,
+    },
+  });
+}
+
+async function refreshAgentBalances(client: CircleDeveloperControlledWalletsClient) {
+  await Promise.all(
+    agents.map(async (agent) => {
+      if (!agent.walletId) return;
+      try {
+        const balances = await client.getWalletTokenBalance({ id: agent.walletId, includeAll: true });
+        const usdc = balances.data?.tokenBalances?.find((balance) => {
+          const token = balance.token;
+          return token.symbol === 'USDC' && token.blockchain === ARC_BLOCKCHAIN;
+        });
+        if (usdc) {
+          agent.balance = Number(usdc.amount);
+          agent.usdcTokenId = usdc.token.id;
+          broadcast('AGENT_UPDATE', {
+            agentId: agent.id,
+            updates: { balance: agent.balance, usdcTokenId: agent.usdcTokenId },
+          });
+        }
+      } catch (error) {
+        console.warn(`Could not refresh Circle balance for ${agent.name}: ${safeError(error)}`);
+      }
+    })
+  );
+}
+
+async function createPayment(fromAgentId: string, toAgentId: string, amount: number, reason: string) {
+  if (circleClient && circleStatus.ready) {
+    const result = await createCirclePayment(circleClient, fromAgentId, toAgentId, amount, reason);
+    if (result) return;
+  }
+
+  createMockPayment(fromAgentId, toAgentId, amount, reason);
+}
+
+async function createCirclePayment(
+  client: CircleDeveloperControlledWalletsClient,
+  fromAgentId: string,
+  toAgentId: string,
+  amount: number,
+  reason: string
+) {
+  const from = resolvePaymentSource(fromAgentId);
+  const to = agents.find((item) => item.id === toAgentId);
+  const tokenId = process.env.CIRCLE_USDC_TOKEN_ID || from?.usdcTokenId || agents.find((agent) => agent.usdcTokenId)?.usdcTokenId;
+
+  if (!from?.walletId || !to?.walletAddress || !tokenId) {
+    broadcast('NEW_MESSAGE', {
+      id: id(),
+      agentId: to?.id || '4',
+      text: 'Circle transfer skipped: fund/configure an Arc testnet USDC source wallet and token id first.',
+      timestamp: Date.now(),
+      kind: 'system',
+    });
+    return false;
+  }
+
+  try {
+    const response = await client.createTransaction({
+      walletId: from.walletId,
+      destinationAddress: to.walletAddress,
+      tokenId,
+      amount: [amount.toFixed(3)],
+      fee: {
+        type: 'level',
+        config: {
+          feeLevel: FeeLevel.Medium,
+        },
+      },
+      refId: `synapse:${reason}:${Date.now()}`,
+      idempotencyKey: randomUUID(),
+    });
+
+    const transaction = response.data;
+    const payment: PaymentEvent = {
+      id: id(),
+      fromAgentId,
+      toAgentId,
+      amount,
+      reason,
+      timestamp: Date.now(),
+      mode: 'circle',
+      transactionId: transaction?.id,
+      status: transaction?.state,
+    };
+
+    applyPaymentAccounting(fromAgentId, toAgentId, amount, reason);
+    broadcast('PAYMENT', payment);
+    broadcast('NEW_MESSAGE', {
+      id: id(),
+      agentId: toAgentId,
+      text: `Circle transfer submitted on Arc testnet: ${amount.toFixed(3)} USDC for ${reason}. Transaction ${transaction?.id || 'pending'}.`,
+      timestamp: Date.now(),
+      kind: 'payment',
+    });
+
+    setTimeout(() => refreshAgentBalances(client).catch((error) => console.warn(safeError(error))), 8000);
+    return true;
+  } catch (error) {
+    const message = safeError(error);
+    const payment: PaymentEvent = {
+      id: id(),
+      fromAgentId,
+      toAgentId,
+      amount,
+      reason,
+      timestamp: Date.now(),
+      mode: 'circle',
+      error: message,
+      status: 'FAILED',
+    };
+
+    broadcast('PAYMENT', payment);
+    broadcast('NEW_MESSAGE', {
+      id: id(),
+      agentId: toAgentId,
+      text: `Circle transfer failed: ${message}`,
+      timestamp: Date.now(),
+      kind: 'system',
+    });
+    return false;
+  }
+}
+
+function createMockPayment(fromAgentId: string, toAgentId: string, amount: number, reason: string) {
+  applyPaymentAccounting(fromAgentId, toAgentId, amount, reason);
+  const payment: PaymentEvent = { id: id(), fromAgentId, toAgentId, amount, reason, timestamp: Date.now(), mode: 'mock' };
+  broadcast('PAYMENT', payment);
+}
+
+function applyPaymentAccounting(fromAgentId: string, toAgentId: string, amount: number, reason: string) {
   const from = agents.find((item) => item.id === fromAgentId);
   const to = agents.find((item) => item.id === toAgentId);
 
@@ -295,9 +566,39 @@ function createPayment(fromAgentId: string, toAgentId: string, amount: number, r
       updates: { balance: to.balance, revenue: to.revenue, reputation: to.reputation },
     });
   }
+}
 
-  const payment: PaymentEvent = { id: id(), fromAgentId, toAgentId, amount, reason, timestamp: Date.now() };
-  broadcast('PAYMENT', payment);
+function resolvePaymentSource(fromAgentId: string) {
+  if (fromAgentId === 'treasury' && process.env.AGENT_WALLET_ID) {
+    return agents.find((agent) => agent.walletId === process.env.AGENT_WALLET_ID) || agents.find((agent) => agent.walletId);
+  }
+  return agents.find((item) => item.id === fromAgentId);
+}
+
+function parseAgentWalletIds() {
+  const raw = process.env.AGENT_WALLET_IDS;
+  if (!raw) return {} as Record<string, string>;
+  return raw.split(',').reduce<Record<string, string>>((acc, pair) => {
+    const [agentId, walletId] = pair.split(':').map((value) => value.trim());
+    if (agentId && walletId) acc[agentId] = walletId;
+    return acc;
+  }, {});
+}
+
+function hasCircleCredentials() {
+  return Boolean(process.env.CIRCLE_API_KEY && process.env.CIRCLE_ENTITY_SECRET);
+}
+
+function agentPublicWallet(agent: Agent) {
+  return {
+    id: agent.id,
+    name: agent.name,
+    walletId: agent.walletId,
+    walletAddress: agent.walletAddress,
+    walletStatus: agent.walletStatus || 'mock',
+    balance: agent.balance,
+    usdcTokenId: agent.usdcTokenId,
+  };
 }
 
 function send(client: WebSocket, type: string, payload: unknown) {
@@ -324,4 +625,10 @@ function money(value: number) {
 
 function id() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function safeError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error && 'message' in error) return String(error.message);
+  return String(error);
 }
