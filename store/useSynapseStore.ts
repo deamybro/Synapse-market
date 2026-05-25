@@ -268,16 +268,31 @@ export const useSynapseStore = create<SynapseStore>((set) => ({
 
     if (socket?.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: 'UNLOCK_PREMIUM', agentId }));
+      set((current) => ({
+        unlockedPremium: { ...current.unlockedPremium, [agentId]: true },
+        debateFeed: [
+          ...current.debateFeed,
+          {
+            id: nowId(),
+            agentId,
+            text: `Circle x402 unlock requested for ${agent.name}. Waiting for Arc testnet settlement.`,
+            timestamp: Date.now(),
+            kind: 'system' as const,
+          },
+        ].slice(-50),
+      }));
+      return;
     }
 
     const amount = 0.021;
     const payment: PaymentEvent = {
       id: nowId(),
-      fromAgentId: 'demo-user',
+      fromAgentId: 'local-wallet',
       toAgentId: agentId,
       amount,
-      reason: 'x402 premium thesis unlock',
+      reason: 'offline premium thesis unlock',
       timestamp: Date.now(),
+      mode: 'mock',
     };
 
     set((current) => ({
@@ -293,7 +308,7 @@ export const useSynapseStore = create<SynapseStore>((set) => ({
         {
           id: nowId(),
           agentId,
-          text: `x402 payment accepted: ${amount.toFixed(3)} USDC unlocked ${agent.name}'s premium thesis.`,
+          text: `Offline unlock: ${amount.toFixed(3)} USDC simulated for ${agent.name}. Connect Railway for Circle settlement.`,
           timestamp: Date.now(),
           kind: 'payment' as const,
         },

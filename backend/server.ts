@@ -305,7 +305,7 @@ function triggerMarketEvent() {
 function unlockPremium(agentId: string) {
   const agent = agents.find((item) => item.id === agentId);
   if (!agent) return;
-  createPayment(process.env.AGENT_WALLET_ID ? 'treasury' : 'demo-user', agentId, 0.021, 'x402 premium thesis unlock');
+  createPayment(process.env.AGENT_WALLET_ID ? 'treasury' : 'local-wallet', agentId, 0.021, 'x402 premium thesis unlock');
   broadcast('NEW_MESSAGE', {
     id: id(),
     agentId,
